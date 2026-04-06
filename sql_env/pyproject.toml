@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-sql-env"
+version = "0.1.0"
+description = "SQL Query Grader environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core[core]>=0.2.2",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.24.0",
+]
+
+[tool.setuptools]
+packages = ["sql_env", "sql_env.server"]
+package-dir = {"sql_env" = ".", "sql_env.server" = "server"}
