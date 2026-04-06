@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn>=0.24.0",
 ]
 
+[project.scripts]
+server = "server.app:main"
+
 [tool.setuptools]
 packages = ["sql_env", "sql_env.server"]
 package-dir = {"sql_env" = ".", "sql_env.server" = "server"}
