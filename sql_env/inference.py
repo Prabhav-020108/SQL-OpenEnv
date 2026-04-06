@@ -1,0 +1,95 @@
+import asyncio
+import os
+from typing import List, Optional
+from openai import OpenAI
+from sql_env import SqlAction, SqlEnv
+
+IMAGE_NAME = os.getenv("IMAGE_NAME")
+API_KEY    = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+
+TASKS     = ["select_basics", "aggregate_filter", "multi_join"]
+MAX_STEPS = 5
+BENCHMARK = "sql_env"
+SUCCESS_THRESHOLD = 0.7
+
+SYSTEM_PROMPT = (
+    "You are an expert SQL writer. You will be given a database schema and a task. "
+    "Write a correct SQL query to solve the task. "
+    "Reply with ONLY the raw SQL — no markdown, no backticks, no explanation."
+)
+
+def log_start(task, env, model):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+def log_step(step, action, reward, done, error):
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error if error else 'null'}", flush=True)
+
+def log_end(success, steps, score, rewards):
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={','.join(f'{r:.2f}' for r in rewards)}", flush=True)
+
+async def run_task(task_name: str):
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    env    = await SqlEnv.from_docker_image(IMAGE_NAME)
+
+    rewards: List[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
+
+    log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
+    try:
+        result = await env.reset(task=task_name)
+        obs = result.observation
+
+        for step in range(1, MAX_STEPS + 1):
+            if result.done:
+                break
+
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": (
+                        f"Schema:\n{obs.schema_info}\n\n"
+                        f"Task:\n{obs.task_description}\n\n"
+                        f"Previous feedback:\n{obs.feedback}\n\n"
+                        "Write the SQL query:"
+                    )},
+                ],
+                max_tokens=300,
+                temperature=0.3,
+            )
+
+            sql    = (completion.choices[0].message.content or "").strip()
+            result = await env.step(SqlAction(sql_query=sql))
+            obs    = result.observation
+            reward = result.reward or 0.0
+
+            rewards.append(reward)
+            steps_taken = step
+            log_step(step=step, action=sql[:100].replace("\n", " "), reward=reward, done=result.done, error=obs.error_message or None)
+
+            if result.done:
+                break
+
+        score   = max(rewards) if rewards else 0.0
+        score   = min(max(score, 0.0), 1.0)
+        success = score >= SUCCESS_THRESHOLD
+
+    finally:
+        try:
+            await env.close()
+        except Exception:
+            pass
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+    return score
+
+async def main():
+    for task in TASKS:
+        await run_task(task)
+
+if __name__ == "__main__":
+    asyncio.run(main())
