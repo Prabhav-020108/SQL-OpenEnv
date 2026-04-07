@@ -11,7 +11,8 @@ COPY sql_env/server/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy the entire sql_env package
-COPY sql_env/ /app/env/
+# COPY sql_env/ /app/env/
+COPY . /app/env/
 
 # Set PYTHONPATH so imports work
 ENV PYTHONPATH="/app/env:$PYTHONPATH"
