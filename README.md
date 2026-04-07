@@ -1,4 +1,5 @@
 ---
+
 title: SQL Query Grader Environment
 emoji: 🗃️
 colorFrom: blue
@@ -108,3 +109,13 @@ API_BASE_URL   — LLM API endpoint
 MODEL_NAME     — model identifier
 HF_TOKEN       — Hugging Face token
 IMAGE_NAME     — local Docker image name
+
+title: Sql Env
+emoji: 🔥
+colorFrom: yellow
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
