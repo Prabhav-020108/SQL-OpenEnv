@@ -136,8 +136,6 @@
 # if __name__ == "__main__":
 #     asyncio.run(main())
 
-
-
 """
 Inference Script — SQL Query Grader Environment
 Mandatory stdout format: [START], [STEP], [END]
@@ -150,11 +148,16 @@ from typing import List, Optional
 from openai import OpenAI
 from sql_env import SqlAction, SqlEnv
 
-# ── Required variables matching the pre-submission checklist exactly ──────────
-API_BASE_URL     = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME       = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN         = os.getenv("HF_TOKEN")                        # no default — required
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") or os.getenv("IMAGE_NAME")  # support both
+# ── Required variables (read from environment) ────────────────────────────────
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+
+# CHANGED: accept either HF_TOKEN or OPENAI_API_KEY so both work
+HF_TOKEN     = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+
+# CHANGED: correct lowercase registry URL — Docker requires all-lowercase names
+# registry.hf.space/codexzzz-sql-env:latest  (NOT Codexzzz, NOT Codexzzz-sql-env)
+DOCKER_IMAGE = "registry.hf.space/codexzzz-sql-env:latest"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TASKS = ["select_basics", "aggregate_filter", "multi_join", "data_anomalies"]
@@ -201,11 +204,19 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 # ── Task runner ───────────────────────────────────────────────────────────────
 
 async def run_task(task_name: str) -> float:
-    # All LLM calls use the OpenAI client configured via the required variables
-    client    = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-    env = await SqlEnv.from_env(repo_id="Codexzzz/sql-env")
-    max_steps = TASK_MAX_STEPS.get(task_name, 5)
+    if not HF_TOKEN:
+        raise ValueError(
+            "No API token found. Set HF_TOKEN or OPENAI_API_KEY environment variable."
+        )
 
+    # CHANGED: use OpenAI client with HF_TOKEN
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+
+    # CHANGED: from_docker_image with all-lowercase registry URL
+    # This pulls registry.hf.space/codexzzz-sql-env:latest and runs it locally
+    env = await SqlEnv.from_docker_image(DOCKER_IMAGE)
+
+    max_steps    = TASK_MAX_STEPS.get(task_name, 5)
     rewards:     List[float] = []
     steps_taken: int         = 0
     score:       float       = 0.0
