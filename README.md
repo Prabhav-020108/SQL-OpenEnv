@@ -77,6 +77,7 @@ cd SQL-OpenEnv
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
+export OPENAI_API_KEY="hf_your_token_here"
 export IMAGE_NAME="Codexzzz-sql-env.hf.space"
 
 pip install openai "openenv-core[core]>=0.2.2"
