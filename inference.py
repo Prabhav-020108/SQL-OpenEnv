@@ -203,7 +203,9 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 async def run_task(task_name: str) -> float:
     # All LLM calls use the OpenAI client configured via the required variables
     client    = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-    env       = await SqlEnv.from_url("https://Codexzzz-sql-env.hf.space")
+    env = await SqlEnv.from_env(
+    base_url="https://Codexzzz-sql-env.hf.space"
+)
     max_steps = TASK_MAX_STEPS.get(task_name, 5)
 
     rewards:     List[float] = []
