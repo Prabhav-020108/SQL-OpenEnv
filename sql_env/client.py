@@ -57,7 +57,6 @@ class SqlEnv(EnvClient[SqlAction, SqlObservation, State]):
             feedback           = obs_data.get("feedback",            ""),
             score_breakdown    = obs_data.get("score_breakdown",     {}),
             attempts_remaining = obs_data.get("attempts_remaining",   0),
-            # done and reward: prefer obs_data value, fall back to top-level payload
             done               = obs_data.get("done",   payload.get("done",   False)),
             reward             = obs_data.get("reward", payload.get("reward", 0.0)),
         )

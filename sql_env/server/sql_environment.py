@@ -396,17 +396,24 @@ try:
 except ImportError:
     from models import SqlAction, SqlObservation
 
-# ─────────────────────────────────────────────
-# SESSION STORAGE — one file per episode (true concurrency support)
-# ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MODULE-LEVEL SESSION STORE
+#
+# The OpenEnv HTTP server creates a NEW SqlEnvironment instance on every
+# request, so self._episode_id would always be None in step().
+# Storing sessions at module level (shared across all instances in the same
+# process) fixes this. We also persist to disk so the DB survives a restart.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MEMORY_SESSIONS: dict = {}   # { episode_id -> session_dict, "__latest__" -> episode_id }
 _SESSION_DIR = Path(tempfile.gettempdir()) / "openenv_sql_env"
 _SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # TASK DEFINITIONS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 TASKS = {
     "select_basics": {
@@ -414,13 +421,15 @@ TASKS = {
             "Find the full name and email address of all customers who live in 'New York'. "
             "Return results sorted alphabetically by name (A to Z)."
         ),
-        "schema": """CREATE TABLE customers (
-    id        INTEGER PRIMARY KEY,
-    name      TEXT    NOT NULL,
-    email     TEXT    NOT NULL,
-    city      TEXT    NOT NULL,
-    age       INTEGER
-);""",
+        "schema": (
+            "CREATE TABLE customers (\n"
+            "    id        INTEGER PRIMARY KEY,\n"
+            "    name      TEXT    NOT NULL,\n"
+            "    email     TEXT    NOT NULL,\n"
+            "    city      TEXT    NOT NULL,\n"
+            "    age       INTEGER\n"
+            ");"
+        ),
         "seed_sql": """
 INSERT INTO customers VALUES (1, 'Alice Brown',  'alice@email.com',  'New York', 28);
 INSERT INTO customers VALUES (2, 'Bob Smith',    'bob@email.com',    'New York', 34);
@@ -442,16 +451,18 @@ INSERT INTO customers VALUES (5, 'Eve Wilson',   'eve@email.com',    'Boston',  
             "Return their name and total amount spent (sum of all their order amounts). "
             "Sort by total amount spent, highest first."
         ),
-        "schema": """CREATE TABLE customers (
-    id    INTEGER PRIMARY KEY,
-    name  TEXT    NOT NULL
-);
-CREATE TABLE orders (
-    id          INTEGER PRIMARY KEY,
-    customer_id INTEGER NOT NULL,
-    amount      REAL    NOT NULL,
-    order_date  TEXT    NOT NULL
-);""",
+        "schema": (
+            "CREATE TABLE customers (\n"
+            "    id    INTEGER PRIMARY KEY,\n"
+            "    name  TEXT    NOT NULL\n"
+            ");\n"
+            "CREATE TABLE orders (\n"
+            "    id          INTEGER PRIMARY KEY,\n"
+            "    customer_id INTEGER NOT NULL,\n"
+            "    amount      REAL    NOT NULL,\n"
+            "    order_date  TEXT    NOT NULL\n"
+            ");"
+        ),
         "seed_sql": """
 INSERT INTO customers VALUES (1, 'Alice Brown');
 INSERT INTO customers VALUES (2, 'Bob Smith');
@@ -477,30 +488,32 @@ INSERT INTO orders VALUES (7,  3,  30.00, '2024-01-05');
             "For each month and product category return: "
             "month in 'YYYY-MM' format, category name, "
             "number of distinct orders that included products from that category, "
-            "and total revenue (quantity × product price, summed across all items). "
+            "and total revenue (quantity x product price, summed across all items). "
             "Order by month ascending, then total revenue descending within each month. "
-            "Only include data from 2024 — exclude any records from other years."
+            "Only include data from 2024 - exclude records from other years."
         ),
-        "schema": """CREATE TABLE categories (
-    id    INTEGER PRIMARY KEY,
-    name  TEXT    NOT NULL
-);
-CREATE TABLE products (
-    id          INTEGER PRIMARY KEY,
-    name        TEXT    NOT NULL,
-    category_id INTEGER NOT NULL,
-    price       REAL    NOT NULL
-);
-CREATE TABLE orders (
-    id         INTEGER PRIMARY KEY,
-    order_date TEXT    NOT NULL
-);
-CREATE TABLE order_items (
-    id         INTEGER PRIMARY KEY,
-    order_id   INTEGER NOT NULL,
-    product_id INTEGER NOT NULL,
-    quantity   INTEGER NOT NULL
-);""",
+        "schema": (
+            "CREATE TABLE categories (\n"
+            "    id    INTEGER PRIMARY KEY,\n"
+            "    name  TEXT    NOT NULL\n"
+            ");\n"
+            "CREATE TABLE products (\n"
+            "    id          INTEGER PRIMARY KEY,\n"
+            "    name        TEXT    NOT NULL,\n"
+            "    category_id INTEGER NOT NULL,\n"
+            "    price       REAL    NOT NULL\n"
+            ");\n"
+            "CREATE TABLE orders (\n"
+            "    id         INTEGER PRIMARY KEY,\n"
+            "    order_date TEXT    NOT NULL\n"
+            ");\n"
+            "CREATE TABLE order_items (\n"
+            "    id         INTEGER PRIMARY KEY,\n"
+            "    order_id   INTEGER NOT NULL,\n"
+            "    product_id INTEGER NOT NULL,\n"
+            "    quantity   INTEGER NOT NULL\n"
+            ");"
+        ),
         "seed_sql": """
 INSERT INTO categories VALUES (1, 'Electronics');
 INSERT INTO categories VALUES (2, 'Books');
@@ -534,18 +547,20 @@ INSERT INTO order_items VALUES (6, 5, 1, 1);
             "Find data quality issues in the customers table. "
             "Return: the type of issue as a string and the count of affected rows. "
             "The three issue types to check are:\n"
-            "  1. 'duplicate_email' — email addresses that appear more than once\n"
-            "  2. 'invalid_age' — age values that are NULL, negative, or greater than 150\n"
-            "  3. 'null_name' — rows where name is NULL\n"
+            "  1. 'duplicate_email' - email addresses that appear more than once\n"
+            "  2. 'invalid_age' - age values that are NULL, negative, or greater than 150\n"
+            "  3. 'null_name' - rows where name is NULL\n"
             "Return all three rows ordered alphabetically by issue type. "
             "Use UNION ALL to combine the three checks into one result set."
         ),
-        "schema": """CREATE TABLE customers (
-    id      INTEGER PRIMARY KEY,
-    name    TEXT,
-    email   TEXT,
-    age     INTEGER
-);""",
+        "schema": (
+            "CREATE TABLE customers (\n"
+            "    id      INTEGER PRIMARY KEY,\n"
+            "    name    TEXT,\n"
+            "    email   TEXT,\n"
+            "    age     INTEGER\n"
+            ");"
+        ),
         "seed_sql": """
 INSERT INTO customers VALUES (1, 'Alice', 'a@test.com',  25);
 INSERT INTO customers VALUES (2,  NULL,   'b@test.com',  30);
@@ -563,40 +578,46 @@ INSERT INTO customers VALUES (5, 'Eve',   'e@test.com', 200);
 }
 
 
-# ─────────────────────────────────────────────
-# THREAD-BASED QUERY TIMEOUT (cross-platform)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# THREAD-BASED QUERY TIMEOUT  (cross-platform, no SIGALRM)
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _run_query_with_timeout(conn: sqlite3.Connection, sql: str, timeout_seconds: int = 5):
+def _run_query_with_timeout(db_path: Path, sql: str, timeout_seconds: int = 5):
     """Execute SQL in a daemon thread with a hard timeout.
-    Returns (result_rows, error_or_None).
+    Returns (rows, error_or_None).
     """
-    result_container: list = [None]
-    error_container:  list = [None]
+    result_box: list = [None]
+    error_box:  list = [None]
 
     def _target():
+        conn = None
         try:
+            conn = sqlite3.connect(str(db_path))
             cursor = conn.execute(sql)
-            result_container[0] = cursor.fetchall()
+            result_box[0] = cursor.fetchall()
         except Exception as exc:
-            error_container[0] = exc
+            error_box[0] = exc
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     t = threading.Thread(target=_target, daemon=True)
     t.start()
     t.join(timeout=timeout_seconds)
 
     if t.is_alive():
-        return None, TimeoutError(f"Query exceeded {timeout_seconds}s time limit.")
-
-    if error_container[0] is not None:
-        return None, error_container[0]
-
-    return result_container[0], None
+        return None, TimeoutError(f"Query exceeded {timeout_seconds}s — avoid full table scans.")
+    if error_box[0] is not None:
+        return None, error_box[0]
+    return result_box[0], None
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # ENVIRONMENT CLASS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 class SqlEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -605,7 +626,7 @@ class SqlEnvironment(Environment):
         self._episode_id: str | None = None
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
-    # ── File paths (per-episode, never shared) ───────────────────────────
+    # ── File helpers (best-effort persistence) ────────────────────────────────
 
     def _db_path(self, episode_id: str) -> Path:
         return _SESSION_DIR / f"{episode_id}.sqlite3"
@@ -613,7 +634,27 @@ class SqlEnvironment(Environment):
     def _meta_path(self, episode_id: str) -> Path:
         return _SESSION_DIR / f"session_{episode_id}.json"
 
-    # ── DB initialisation ────────────────────────────────────────────────
+    def _save_session_file(self, session: dict) -> None:
+        try:
+            path = self._meta_path(session["episode_id"])
+            tmp  = path.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(session, f)
+            tmp.replace(path)
+        except Exception:
+            pass  # file persistence is best-effort; memory is primary
+
+    def _load_session_file(self, episode_id: str) -> dict:
+        try:
+            path = self._meta_path(episode_id)
+            if not path.exists():
+                return {}
+            with path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    # ── DB initialisation ─────────────────────────────────────────────────────
 
     def _initialise_db(self, task_name: str, db_path: Path) -> None:
         task = TASKS[task_name]
@@ -630,52 +671,63 @@ class SqlEnvironment(Environment):
         finally:
             conn.close()
 
-    # ── Per-episode session persistence ──────────────────────────────────
+    # ── Session resolution ────────────────────────────────────────────────────
 
-    def _load_session(self) -> dict:
-        if not self._episode_id:
-            return {}
-        path = self._meta_path(self._episode_id)
-        if not path.exists():
-            return {}
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+    def _resolve_session(self) -> dict:
+        """Find the session for the current episode.
+
+        Priority order:
+          1. self._episode_id  (WebSocket / persistent instance where reset was called)
+          2. _MEMORY_SESSIONS["__latest__"]  (HTTP, same process, new instance per request)
+          3. Disk fallback for the resolved episode_id  (container restart recovery)
+        """
+        episode_id = self._episode_id or _MEMORY_SESSIONS.get("__latest__")
+        if not episode_id:
             return {}
 
-    def _save_session(self, session: dict) -> None:
-        path = self._meta_path(session["episode_id"])
-        tmp  = path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(session, f)
-        tmp.replace(path)
+        session = _MEMORY_SESSIONS.get(episode_id, {})
+        if not session:
+            session = self._load_session_file(episode_id)
+            if session:
+                _MEMORY_SESSIONS[episode_id] = session
 
-    # ── Environment interface ────────────────────────────────────────────
+        if session:
+            self._episode_id = episode_id  # pin for this request
+
+        return session
+
+    # ── reset() ──────────────────────────────────────────────────────────────
 
     def reset(self, seed=None, episode_id=None, **kwargs) -> SqlObservation:
         task_name = kwargs.get("task", "select_basics")
         if task_name not in TASKS:
             task_name = "select_basics"
 
-        task            = TASKS[task_name]
-        new_episode_id  = episode_id or str(uuid4())
-        db_path         = self._db_path(new_episode_id)
+        task    = TASKS[task_name]
+        new_id  = episode_id or str(uuid4())
+        db_path = self._db_path(new_id)
 
         self._initialise_db(task_name, db_path)
-        self._episode_id = new_episode_id
-        self._state      = State(episode_id=new_episode_id, step_count=0)
 
-        self._save_session({
-            "episode_id": new_episode_id,
+        session = {
+            "episode_id": new_id,
             "task_name":  task_name,
             "db_path":    str(db_path),
             "step_count": 0,
-        })
+        }
+
+        # Primary store: module-level dict (survives across instances in same process)
+        _MEMORY_SESSIONS[new_id]       = session
+        _MEMORY_SESSIONS["__latest__"] = new_id
+        # Secondary store: disk (survives container restart)
+        self._save_session_file(session)
+
+        self._episode_id = new_id
+        self._state      = State(episode_id=new_id, step_count=0)
 
         return SqlObservation(
             task_description   = task["description"],
-            schema_info        = task["schema"].strip(),
+            schema_info        = task["schema"],
             query_result       = [],
             error_message      = "",
             feedback           = "Episode started. Write a SQL query to solve the task above.",
@@ -685,17 +737,18 @@ class SqlEnvironment(Environment):
             reward             = 0.0,
         )
 
-    def step(self, action: SqlAction) -> SqlObservation:
-        session = self._load_session()
+    # ── step() ────────────────────────────────────────────────────────────────
 
-        # Guard: no active session
-        if not session or not session.get("db_path"):
+    def step(self, action: SqlAction) -> SqlObservation:
+        session = self._resolve_session()
+
+        if not session:
             return SqlObservation(
                 task_description   = "",
                 schema_info        = "",
                 query_result       = [],
                 error_message      = "No active session. Call /reset first.",
-                feedback           = "No active session — please call /reset before /step.",
+                feedback           = "No active session — call /reset before /step.",
                 score_breakdown    = {"execute": -0.05},
                 attempts_remaining = 0,
                 done               = True,
@@ -706,56 +759,50 @@ class SqlEnvironment(Environment):
         if task_name not in TASKS:
             task_name = "select_basics"
 
-        db_path    = Path(session["db_path"])
-        step_count = int(session.get("step_count", 0)) + 1
+        db_path = Path(session.get("db_path") or str(self._db_path(session["episode_id"])))
 
-        # Re-seed if DB was lost (e.g. container restart)
+        # Re-seed if the DB file was lost (e.g. tmpfs wipe on restart)
         if not db_path.exists():
             self._initialise_db(task_name, db_path)
 
+        # Advance step counter
+        step_count            = int(session.get("step_count", 0)) + 1
         session["step_count"] = step_count
-        self._save_session(session)
+        _MEMORY_SESSIONS[self._episode_id] = session
+        self._save_session_file(session)
 
-        self._episode_id = session.get("episode_id")
-        self._state      = State(
-            episode_id=self._episode_id or str(uuid4()),
-            step_count=step_count,
+        self._state = State(
+            episode_id = self._episode_id or str(uuid4()),
+            step_count = step_count,
         )
 
         task               = TASKS[task_name]
         attempts_remaining = task["max_steps"] - step_count
 
-        conn = sqlite3.connect(str(db_path))
-        try:
-            result, err = _run_query_with_timeout(conn, action.sql_query, timeout_seconds=5)
+        rows, err = _run_query_with_timeout(db_path, action.sql_query, timeout_seconds=5)
 
-            if isinstance(err, TimeoutError):
-                reward     = -0.10
-                result     = []
-                feedback   = "Query timed out (>5s). Avoid full table scans or infinite loops."
-                breakdown  = {"execute": -0.10}
-                error_msg  = str(err)
-
-            elif err is not None:
-                reward     = -0.05
-                result     = []
-                feedback   = f"SQL Error: {err}. Fix your syntax and try again."
-                breakdown  = {"execute": -0.05}
-                error_msg  = str(err)
-
-            else:
-                reward, feedback, breakdown = self._grade(result, task["expected"], action.sql_query)
-                error_msg  = ""
-
-        finally:
-            conn.close()
+        if isinstance(err, TimeoutError):
+            reward    = -0.10
+            rows      = []
+            feedback  = str(err)
+            breakdown = {"execute": -0.10}
+            error_msg = str(err)
+        elif err is not None:
+            reward    = -0.05
+            rows      = []
+            feedback  = f"SQL Error: {err}. Fix your syntax and try again."
+            breakdown = {"execute": -0.05}
+            error_msg = str(err)
+        else:
+            reward, feedback, breakdown = self._grade(rows, task["expected"], action.sql_query)
+            error_msg = ""
 
         done = reward >= 0.95 or attempts_remaining <= 0
 
         return SqlObservation(
             task_description   = task["description"],
-            schema_info        = task["schema"].strip(),
-            query_result       = [list(r) for r in (result or [])],
+            schema_info        = task["schema"],
+            query_result       = [list(r) for r in (rows or [])],
             error_message      = error_msg,
             feedback           = feedback,
             score_breakdown    = breakdown,
@@ -764,13 +811,10 @@ class SqlEnvironment(Environment):
             reward             = float(max(-0.10, min(1.0, reward))),
         )
 
-    # ── Grader ───────────────────────────────────────────────────────────
+    # ── Grader ────────────────────────────────────────────────────────────────
 
     def _grade(self, result: list, expected: list, sql_query: str):
-        breakdown: dict = {}
-
-        # 1. Execute bonus (reached here means no error)
-        breakdown["execute"] = 0.10
+        breakdown: dict = {"execute": 0.10}
 
         if not result:
             return (
@@ -782,7 +826,6 @@ class SqlEnvironment(Environment):
         result_set   = set(tuple(r) for r in result)
         expected_set = set(tuple(e) for e in expected)
 
-        # 2. Column score
         result_cols   = len(result[0])   if result   else 0
         expected_cols = len(expected[0]) if expected else 0
         col_score = (
@@ -791,25 +834,20 @@ class SqlEnvironment(Environment):
         )
         breakdown["columns"] = round(col_score, 3)
 
-        # 3. Row count score
-        row_ratio = min(1.0, len(result) / max(len(expected), 1))
-        row_score = 0.20 * row_ratio
+        row_score = 0.20 * min(1.0, len(result) / max(len(expected), 1))
         breakdown["rows"] = round(row_score, 3)
 
-        # 4. Value F1 score
         f1        = self._f1(result_set, expected_set)
         val_score = 0.40 * f1
         breakdown["values"] = round(val_score, 3)
 
-        # 5. Efficiency bonus (penalise SELECT *)
         uses_star = "select*" in sql_query.lower().replace(" ", "")
         eff_score = 0.0 if uses_star else 0.10
         breakdown["efficiency"] = eff_score
 
         total = breakdown["execute"] + col_score + row_score + val_score + eff_score
+        pct   = int(f1 * 100)
 
-        # Human-readable feedback — specific, actionable
-        pct = int(f1 * 100)
         if f1 >= 1.0 and col_score >= 0.20 and row_score >= 0.20:
             feedback = (
                 "Perfect! Exact match."
@@ -819,29 +857,29 @@ class SqlEnvironment(Environment):
         elif result_cols > expected_cols:
             feedback = (
                 f"Too many columns ({result_cols} returned, {expected_cols} expected). "
-                f"Remove extra columns from SELECT."
+                "Remove extra columns from SELECT."
             )
         elif result_cols < expected_cols:
             feedback = (
                 f"Too few columns ({result_cols} returned, {expected_cols} expected). "
-                f"Add missing columns to SELECT."
+                "Add missing columns to SELECT."
             )
         elif len(result) > len(expected) * 1.5:
             feedback = (
-                f"Too many rows returned ({len(result)} vs {len(expected)} expected). "
-                f"Check your WHERE or HAVING clause — you may be missing a filter."
+                f"Too many rows ({len(result)} vs {len(expected)} expected). "
+                "Check your WHERE or HAVING — a filter may be missing."
             )
         elif len(result) < len(expected):
             feedback = (
-                f"Too few rows returned ({len(result)} vs {len(expected)} expected). "
-                f"Check your JOIN or WHERE — some matching rows are being excluded."
+                f"Too few rows ({len(result)} vs {len(expected)} expected). "
+                "Check your JOIN or WHERE — some matching rows are being excluded."
             )
         elif f1 >= 0.8:
             feedback = f"Very close! {pct}% of values match. Check column ordering or data type casting."
         elif f1 >= 0.5:
-            feedback = f"Partial match: {pct}% correct. Re-read the task and check your filters or aggregation."
+            feedback = f"Partial match: {pct}% correct. Re-read the task and check your filters."
         else:
-            feedback = f"Mostly incorrect ({pct}% match). Start from the schema and re-read the task carefully."
+            feedback = f"Mostly incorrect ({pct}% match). Start from the schema and re-read the task."
 
         return round(total, 3), feedback, breakdown
 
@@ -857,8 +895,6 @@ class SqlEnvironment(Environment):
         if precision + recall == 0:
             return 0.0
         return 2 * precision * recall / (precision + recall)
-
-    # ── State property ────────────────────────────────────────────────────
 
     @property
     def state(self) -> State:

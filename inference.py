@@ -97,9 +97,11 @@
 
 
 
+
 """
 Inference Script — SQL Query Grader Environment
 Mandatory stdout format: [START], [STEP], [END]
+Place this file at the repo ROOT (not inside sql_env/).
 """
 import asyncio
 import os
@@ -113,7 +115,6 @@ API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 
-# Each task now respects its own max_steps
 TASKS = ["select_basics", "aggregate_filter", "multi_join", "data_anomalies"]
 TASK_MAX_STEPS = {
     "select_basics":    5,

@@ -28,12 +28,12 @@ class SqlAction(Action):
 
 class SqlObservation(Observation):
     """What the agent sees after each reset() or step()."""
-    task_description:   str   = Field(default="",             description="Natural language task")
-    schema_info:        str   = Field(default="",             description="DDL schema of the database")
-    query_result:       list  = Field(default_factory=list,   description="Rows returned by query")
-    error_message:      str   = Field(default="",             description="SQL error string if query failed")
-    feedback:           str   = Field(default="",             description="Human-readable grader feedback")
-    score_breakdown:    dict  = Field(default_factory=dict,   description="Partial score components")
-    attempts_remaining: int   = Field(default=5,              description="Steps remaining in episode")
-    done:               bool  = Field(default=False,          description="Whether the episode has ended")
-    reward:             float = Field(default=0.0,            description="Reward for this step")
+    task_description:   str   = Field(default="",           description="Natural language task")
+    schema_info:        str   = Field(default="",           description="DDL schema of the database")
+    query_result:       list  = Field(default_factory=list, description="Rows returned by query")
+    error_message:      str   = Field(default="",           description="SQL error string if query failed")
+    feedback:           str   = Field(default="",           description="Human-readable grader feedback")
+    score_breakdown:    dict  = Field(default_factory=dict, description="Partial score components")
+    attempts_remaining: int   = Field(default=5,            description="Steps remaining in episode")
+    done:               bool  = Field(default=False,        description="Whether the episode has ended")
+    reward:             float = Field(default=0.0,          description="Reward for this step")

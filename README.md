@@ -427,7 +427,7 @@ uvicorn server.app:app --host 0.0.0.0 --port 8000
 # Set variables (Windows PowerShell)
 $env:API_BASE_URL = "https://router.huggingface.co/v1"
 $env:MODEL_NAME   = "Qwen/Qwen2.5-72B-Instruct"
-$env:HF_TOKEN     = "your_token_here"
+$env:HF_TOKEN     = "hf....l"
 $env:IMAGE_NAME   = "sql-env:latest"
 
 python inference.py
@@ -435,7 +435,7 @@ python inference.py
 # Set variables (Linux/Mac)
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
-export HF_TOKEN="your_token_here"
+export HF_TOKEN="hf....l"
 export IMAGE_NAME="sql-env:latest"
 
 python inference.py
