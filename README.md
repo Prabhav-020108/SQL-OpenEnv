@@ -441,6 +441,7 @@ pip install openai "openenv-core[core]>=0.2.2"
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
+export OPENAI_API_KEY="hf_your_token_here"
 export IMAGE_NAME="Codexzzz-sql-env.hf.space"
 
 python inference.py
@@ -466,6 +467,7 @@ export IMAGE_NAME="sql-env:latest"
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
+export OPENAI_API_KEY="hf_your_token_here"
 python inference.py
 ```
 
@@ -497,6 +499,7 @@ PYTHONPATH=./sql_env uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
+export OPENAI_API_KEY="hf_your_token_here"
 export IMAGE_NAME="sql-env:latest"
 python inference.py
 ```
@@ -507,6 +510,7 @@ python inference.py
 $env:API_BASE_URL = "https://router.huggingface.co/v1"
 $env:MODEL_NAME   = "Qwen/Qwen2.5-72B-Instruct"
 $env:HF_TOKEN     = "hf_your_token_here"
+$env:OPENAI_API_KEY     = "hf_your_token_here"
 $env:IMAGE_NAME   = "sql-env:latest"
 python inference.py
 ```
