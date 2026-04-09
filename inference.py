@@ -169,10 +169,7 @@ TASK_MAX_STEPS = {
 }
 BENCHMARK         = "sql_env"
 SUCCESS_THRESHOLD = 0.7
-# Validator-facing score bounds.
-# Keep a safety margin from 0 and 1 so even downstream rounding stays in-range.
-VALIDATOR_SCORE_MIN = 0.01
-VALIDATOR_SCORE_MAX = 0.99
+SCORE_EPSILON     = 1e-6
 
 SYSTEM_PROMPT = (
     "You are an expert SQL writer. You will be given a database schema and a task. "
@@ -200,7 +197,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.3f} rewards={rewards_str}",
+        f"score={score:.6f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -274,9 +271,9 @@ async def run_task(task_name: str) -> float:
                 break
 
         raw_score = max(rewards) if rewards else 0.0
-        # Hackathon validator requires score strictly inside (0, 1).
-        # Use a visible safety margin so formatting/rounding can't bounce to 0.0/1.0.
-        score   = min(max(raw_score, VALIDATOR_SCORE_MIN), VALIDATOR_SCORE_MAX)
+        # Hackathon validator requires score strictly inside (0, 1),
+        # so nudge only by a tiny epsilon to avoid materially changing metrics.
+        score   = min(max(raw_score, SCORE_EPSILON), 1.0 - SCORE_EPSILON)
         success = raw_score >= SUCCESS_THRESHOLD
 
     finally:
