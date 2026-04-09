@@ -169,6 +169,7 @@ TASK_MAX_STEPS = {
 }
 BENCHMARK         = "sql_env"
 SUCCESS_THRESHOLD = 0.7
+SCORE_EPSILON     = 1e-6
 
 SYSTEM_PROMPT = (
     "You are an expert SQL writer. You will be given a database schema and a task. "
@@ -196,7 +197,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.2f} rewards={rewards_str}",
+        f"score={score:.6f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -269,9 +270,11 @@ async def run_task(task_name: str) -> float:
             if result.done:
                 break
 
-        score   = max(rewards) if rewards else 0.0
-        score   = min(max(score, 0.0), 1.0)
-        success = score >= SUCCESS_THRESHOLD
+        raw_score = max(rewards) if rewards else 0.0
+        # Hackathon validator requires score strictly inside (0, 1),
+        # so nudge only by a tiny epsilon to avoid materially changing metrics.
+        score   = min(max(raw_score, SCORE_EPSILON), 1.0 - SCORE_EPSILON)
+        success = raw_score >= SUCCESS_THRESHOLD
 
     finally:
         try:
