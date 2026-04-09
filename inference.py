@@ -148,15 +148,15 @@ from typing import List, Optional
 from openai import OpenAI
 from sql_env import SqlAction, SqlEnv
 
-# ── Required variables (read from environment) ────────────────────────────────
+# ── Required variables ────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-
-# CHANGED: accept either HF_TOKEN or OPENAI_API_KEY so both work
 HF_TOKEN     = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
 
-# CHANGED: correct lowercase registry URL — Docker requires all-lowercase names
-# registry.hf.space/codexzzz-sql-env:latest  (NOT Codexzzz, NOT Codexzzz-sql-env)
+# ── FIXED: all-lowercase registry URL ────────────────────────────────────────
+# from_env("Codexzzz/sql-env") converts to registry.hf.space/Codexzzz-sql-env
+# Docker rejects uppercase → exit 125 "invalid reference format"
+# Fix: hardcode lowercase and use from_docker_image() directly
 DOCKER_IMAGE = "registry.hf.space/codexzzz-sql-env:latest"
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ SYSTEM_PROMPT = (
 )
 
 
-# ── Logging helpers (exact format required by competition) ────────────────────
+# ── Logging helpers ───────────────────────────────────────────────────────────
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -209,11 +209,10 @@ async def run_task(task_name: str) -> float:
             "No API token found. Set HF_TOKEN or OPENAI_API_KEY environment variable."
         )
 
-    # CHANGED: use OpenAI client with HF_TOKEN
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
-    # CHANGED: from_docker_image with all-lowercase registry URL
-    # This pulls registry.hf.space/codexzzz-sql-env:latest and runs it locally
+    # FIXED: from_docker_image with all-lowercase image name
+    # This avoids the uppercase conversion bug in from_env()
     env = await SqlEnv.from_docker_image(DOCKER_IMAGE)
 
     max_steps    = TASK_MAX_STEPS.get(task_name, 5)
