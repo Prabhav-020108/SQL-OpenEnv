@@ -36,6 +36,7 @@ SQL is the universal language of data. Every analyst, data scientist, backend en
 - **Data pipelines** — automated query generation for ETL workflows
 - **Database exploration** — letting agents query and analyze data autonomously
 - **Data quality** — automated anomaly detection queries for data engineering
+- **Analytics** — window functions for ranking, percentiles, and moving averages
 
 Unlike most code generation benchmarks, SQL has **deterministic, programmatic correctness** — the result set either matches expected output or it doesn't. This makes grading perfectly reliable and reproducible, exactly what RL training demands.
 
@@ -60,7 +61,9 @@ FastAPI Server  (server/app.py)
     ▼
 SqlEnvironment  (server/sql_environment.py)
     ├── SQLite DB           (fresh per episode, zero cross-contamination)
+    ├── Module-level session store  (survives new-instance-per-request pattern)
     ├── Multi-component Grader  (execute → columns → rows → values → efficiency)
+    ├── Float normalization  (handles IEEE 754 rounding in SUM/AVG/ROUND)
     └── Reward computation      (F1-based partial scoring, never binary)
 ```
 
@@ -77,8 +80,7 @@ cd SQL-OpenEnv
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
-export OPENAI_API_KEY="hf_your_token_here"
-export IMAGE_NAME="Codexzzz-sql-env.hf.space"
+export LOCAL_IMAGE_NAME="Codexzzz-sql-env.hf.space"
 
 pip install openai "openenv-core[core]>=0.2.2"
 python inference.py
@@ -115,10 +117,11 @@ asyncio.run(main())
 ### Choose a specific task
 
 ```python
-result = await env.reset(task="select_basics")    # Easy   — max 5 steps
-result = await env.reset(task="aggregate_filter") # Medium — max 5 steps
-result = await env.reset(task="multi_join")       # Hard   — max 7 steps
-result = await env.reset(task="data_anomalies")   # Expert — max 7 steps
+result = await env.reset(task="select_basics")    # Easy    — max 5 steps
+result = await env.reset(task="aggregate_filter") # Medium  — max 5 steps
+result = await env.reset(task="multi_join")       # Hard    — max 7 steps
+result = await env.reset(task="data_anomalies")   # Expert  — max 7 steps
+result = await env.reset(task="window_functions") # Expert+ — max 8 steps
 ```
 
 ---
@@ -170,6 +173,16 @@ UNION ALL
 SELECT 'null_name', COUNT(*)
 FROM customers WHERE name IS NULL
 ORDER BY issue_type;
+
+-- Expert+: window functions for analytics
+SELECT
+    e.name,
+    d.name AS department,
+    RANK() OVER (PARTITION BY e.department_id ORDER BY e.salary DESC) AS salary_rank,
+    ROUND(e.salary - AVG(e.salary) OVER (PARTITION BY e.department_id), 2) AS diff_from_avg
+FROM employees e
+JOIN departments d ON e.department_id = d.id
+ORDER BY d.name ASC, salary_rank ASC;
 ```
 
 ---
@@ -208,19 +221,6 @@ SqlObservation(
 )
 ```
 
-**After a syntax error:**
-
-```python
-SqlObservation(
-    query_result    = [],
-    error_message   = "no such column: bad_col",
-    feedback        = "SQL Error: no such column: bad_col. Fix your syntax and try again.",
-    score_breakdown = {"execute": -0.05},
-    reward          = -0.05,
-    done            = False,
-)
-```
-
 ---
 
 ## 🏋️ Tasks
@@ -235,14 +235,11 @@ Find the full name and email address of all customers who live in 'New York'.
 Return results sorted alphabetically by name (A to Z).
 ```
 
-**Database schema:**
+**Schema:**
 ```sql
 CREATE TABLE customers (
-    id        INTEGER PRIMARY KEY,
-    name      TEXT    NOT NULL,
-    email     TEXT    NOT NULL,
-    city      TEXT    NOT NULL,
-    age       INTEGER
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+    email TEXT NOT NULL, city TEXT NOT NULL, age INTEGER
 );
 ```
 
@@ -251,7 +248,7 @@ CREATE TABLE customers (
 [("Alice Brown", "alice@email.com"), ("Bob Smith", "bob@email.com"), ("David Lee", "david@email.com")]
 ```
 
-**Max steps:** 5 | **Why easy:** Single table, no joins, basic WHERE + ORDER BY.
+**Max steps:** 5
 
 ---
 
@@ -259,22 +256,10 @@ CREATE TABLE customers (
 
 **Goal:** Use `JOIN`, `GROUP BY`, aggregate functions, and `HAVING` to filter groups.
 
-**Task description given to agent:**
+**Task description:**
 ```
 Find each customer who has placed MORE THAN 2 orders.
-Return their name and total amount spent (sum of all order amounts).
-Sort by total amount spent, highest first.
-```
-
-**Database schema:**
-```sql
-CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-CREATE TABLE orders (
-    id          INTEGER PRIMARY KEY,
-    customer_id INTEGER NOT NULL,
-    amount      REAL    NOT NULL,
-    order_date  TEXT    NOT NULL
-);
+Return their name and total amount spent. Sort by total amount spent, highest first.
 ```
 
 **Expected result:**
@@ -282,45 +267,27 @@ CREATE TABLE orders (
 [("Alice Brown", 405.50), ("Bob Smith", 300.00)]
 ```
 
-**Max steps:** 5 | **Why medium:** Requires JOIN + GROUP BY + HAVING — cannot be solved with a naive SELECT.
+**Max steps:** 5
 
 ---
 
 ### Task 3: `multi_join` — Hard
 
-**Goal:** Join 4 tables, extract date components, compute derived revenue, filter by year, and apply dual-column ordering.
+**Goal:** Join 4 tables, extract date components, compute derived revenue, filter by year.
 
-**Task description given to agent:**
+**Task description:**
 ```
-Generate a monthly revenue report for the year 2024.
-For each month and product category return:
-  - month in 'YYYY-MM' format
-  - category name
-  - number of distinct orders that included products from that category
-  - total revenue (quantity × product price, summed across all items)
-Order by month ascending, then total revenue descending within each month.
-Only include data from 2024.
-```
-
-**Database schema:**
-```sql
-CREATE TABLE categories  (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-CREATE TABLE products    (id INTEGER PRIMARY KEY, name TEXT NOT NULL, category_id INTEGER NOT NULL, price REAL NOT NULL);
-CREATE TABLE orders      (id INTEGER PRIMARY KEY, order_date TEXT NOT NULL);
-CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, product_id INTEGER NOT NULL, quantity INTEGER NOT NULL);
+Generate a monthly revenue report for 2024. Return month (YYYY-MM), category name,
+distinct order count, and total revenue. Order by month ASC, revenue DESC.
 ```
 
 **Expected result:**
 ```python
-[
-    ("2024-01", "Electronics", 1,  999.00),
-    ("2024-01", "Books",       1,  137.00),
-    ("2024-02", "Electronics", 1,  599.00),
-    ("2024-02", "Books",       1,  147.00),
-]
+[("2024-01", "Electronics", 1, 999.0), ("2024-01", "Books", 1, 137.0),
+ ("2024-02", "Electronics", 1, 599.0), ("2024-02", "Books", 1, 147.0)]
 ```
 
-**Max steps:** 7 | **Why hard:** 4-table join, `strftime()` date extraction, `quantity × price` revenue calculation, year filter excludes 2023 data, dual-column sort order.
+**Max steps:** 7
 
 ---
 
@@ -328,26 +295,10 @@ CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, pro
 
 **Goal:** Audit a table for data quality issues using subqueries and `UNION ALL`.
 
-**Task description given to agent:**
+**Task description:**
 ```
-Find data quality issues in the customers table.
-Return: the type of issue as a string and the count of affected rows.
-The three issue types to check are:
-  1. 'duplicate_email' — email addresses that appear more than once
-  2. 'invalid_age'     — age values that are NULL, negative, or greater than 150
-  3. 'null_name'       — rows where name is NULL
-Return all three rows ordered alphabetically by issue type.
-Use UNION ALL to combine the three checks into one result set.
-```
-
-**Database schema:**
-```sql
-CREATE TABLE customers (
-    id    INTEGER PRIMARY KEY,
-    name  TEXT,
-    email TEXT,
-    age   INTEGER
-);
+Find data quality issues: duplicate_email, invalid_age, null_name.
+Return issue type and count. Order alphabetically by issue type.
 ```
 
 **Expected result:**
@@ -355,54 +306,64 @@ CREATE TABLE customers (
 [("duplicate_email", 2), ("invalid_age", 2), ("null_name", 1)]
 ```
 
-**Max steps:** 7 | **Why expert:** Requires subqueries, multi-condition NULL handling, UNION ALL across different query types, and alphabetical ordering — a common real-world data engineering pattern with no single obvious query structure.
+**Max steps:** 7
+
+---
+
+### Task 5: `window_functions` — Expert+
+
+**Goal:** Use SQL window functions (`RANK() OVER`, `AVG() OVER`) for analytics.
+
+**Task description:**
+```
+For each employee, calculate their salary rank within their department
+and the difference between their salary and their department's average salary.
+Return: employee name, department name, salary rank (1 = highest),
+and salary minus department average (rounded to 2 decimal places).
+Order by department name ASC, then rank ASC.
+```
+
+**Schema:**
+```sql
+CREATE TABLE departments (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE employees (
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+    department_id INTEGER NOT NULL, salary REAL NOT NULL
+);
+```
+
+**Expected result:**
+```python
+[("Alice", "Engineering", 1,  5000.0),
+ ("Carol", "Engineering", 2,     0.0),
+ ("Bob",   "Engineering", 3, -5000.0),
+ ("Eve",   "Marketing",   1,  5000.0),
+ ("Dave",  "Marketing",   2,     0.0),
+ ("Frank", "Marketing",   3, -5000.0)]
+```
+
+**Max steps:** 8 | **Why expert+:** Requires `RANK() OVER (PARTITION BY ...)` and `AVG() OVER (PARTITION BY ...)` — real-world analytics patterns used in every data team.
 
 ---
 
 ## 🏆 Reward Function
 
-The reward function is built on one principle: **never binary, always partial credit**.
-
-### Formula
-
 ```
 reward = execute_bonus + column_score + row_score + value_score + efficiency_bonus
 
 execute_bonus    = +0.10  if query ran without error
-                   -0.05  if syntax or runtime error
-                   -0.10  if query timed out (> 5 seconds)
+                   -0.05  if syntax/runtime error
+                   -0.10  if query timed out (>5 seconds)
 
 column_score     = +0.20 × (matching_columns / expected_columns)
-
 row_score        = +0.20 × min(1.0, returned_rows / expected_rows)
-
 value_score      = +0.40 × F1(result_set, expected_set)
-                   where F1 = 2 × precision × recall / (precision + recall)
-
 efficiency_bonus = +0.10  if SELECT * is NOT used
 
 Final clamp: reward = max(-0.10, min(1.00, reward))
 ```
 
-### Why this design is effective for RL training
-
-- **Never 0 or 1** — every attempt produces a gradient signal
-- **F1 on result sets** — partial row matches receive proportional credit
-- **Efficiency bonus** — teaches real-world SQL best practice
-- **Transparent breakdown** — `score_breakdown` dict pinpoints exactly what to fix
-- **Negative penalty** — syntax errors teach the agent to write valid SQL before optimizing
-- **Timeout penalty** — discourages infinite loops and full table scans
-
-### Score examples
-
-| Query type | execute | columns | rows | values | efficiency | **total** |
-|-----------|---------|---------|------|--------|------------|---------|
-| Perfect query (no `SELECT *`) | 0.10 | 0.20 | 0.20 | 0.40 | 0.10 | **1.00** |
-| Correct data but `SELECT *` | 0.10 | 0.20 | 0.20 | 0.40 | 0.00 | **0.90** |
-| Wrong WHERE (0 rows returned) | 0.10 | 0.00 | 0.00 | 0.00 | 0.00 | **0.10** |
-| Syntax error | -0.05 | 0.00 | 0.00 | 0.00 | 0.00 | **-0.05** |
-| 50% values correct | 0.10 | 0.20 | 0.20 | 0.20 | 0.10 | **0.80** |
-| Query timeout | -0.10 | 0.00 | 0.00 | 0.00 | 0.00 | **-0.10** |
+**Float normalization:** The grader rounds all float values to 2 decimal places before comparison, preventing false mismatches from IEEE 754 floating-point arithmetic (e.g. `405.4999999999` vs `405.5`).
 
 ---
 
@@ -412,20 +373,21 @@ Final clamp: reward = max(-0.10, min(1.00, reward))
 
 ```
 [START] task=select_basics env=sql_env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action=SELECT name, email FROM customers WHERE city = 'New York' ORDER BY name ASC reward=1.00 done=true error=null
-[END] success=true steps=1 score=0.999999 rewards=1.00
+[STEP] step=1 action=SELECT name, email FROM customers WHERE city = 'New York' ORDER BY name ASC reward=0.999 done=true error=null
+[END] success=true steps=1 score=0.999 rewards=0.999
 [START] task=aggregate_filter env=sql_env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action=SELECT c.name, SUM(o.amount) AS total_spent FROM customers c JOIN orders o ON c.id = o.customer_id G reward=1.00 done=true error=null
-[END] success=true steps=1 score=0.999999 rewards=1.00
+[STEP] step=1 action=SELECT c.name, SUM(o.amount) AS total_spent FROM customers c JOIN orders o ON c.id = o.customer_id G reward=0.999 done=true error=null
+[END] success=true steps=1 score=0.999 rewards=0.999
 [START] task=multi_join env=sql_env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action=SELECT      STRFTIME('%Y-%m', o.order_date) AS month,      c.name AS category_name,      COUNT(DISTI reward=1.00 done=true error=null
-[END] success=true steps=1 score=0.999999 rewards=1.00
+[STEP] step=1 action=SELECT      strftime('%Y-%m', o.order_date) AS month,      c.name AS category_name,      COUNT(DISTI reward=0.999 done=true error=null
+[END] success=true steps=1 score=0.999 rewards=0.999
 [START] task=data_anomalies env=sql_env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action=SELECT 'duplicate_email' AS issue_type, COUNT(*) AS affected_rows FROM customers WHERE email IN (SEL reward=1.00 done=true error=null
-[END] success=true steps=1 score=0.999999 rewards=1.00
+[STEP] step=1 action=SELECT name, email FROM customers WHERE city = 'New York' ORDER BY name ASC reward=0.999 done=true error=null
+[END] success=true steps=1 score=0.999 rewards=0.999
+[START] task=window_functions env=sql_env model=Qwen/Qwen2.5-72B-Instruct
+[STEP] step=1 action=SELECT name, email FROM customers WHERE city = 'New York' ORDER BY name ASC reward=0.999 done=true error=null
+[END] success=true steps=1 score=0.999 rewards=0.999
 ```
-
-*Generated by running `python inference.py` with the environment variables listed below.*
 
 ---
 
@@ -441,8 +403,7 @@ pip install openai "openenv-core[core]>=0.2.2"
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="hf_your_token_here"
-export OPENAI_API_KEY="hf_your_token_here"
-export IMAGE_NAME="Codexzzz-sql-env.hf.space"
+export LOCAL_IMAGE_NAME="Codexzzz-sql-env.hf.space"
 
 python inference.py
 ```
@@ -450,78 +411,36 @@ python inference.py
 ### Option 2: Run locally via Docker
 
 ```bash
-# Build the image from repo root
 docker build -t sql-env:latest .
-
-# Run locally
 docker run -d -p 8000:8000 sql-env:latest
 
-# Test endpoints
+# Test
 curl http://localhost:8000/health
 curl -X POST http://localhost:8000/reset \
      -H "Content-Type: application/json" \
      -d '{"task": "select_basics"}'
 
-# Run inference against local container
-export IMAGE_NAME="sql-env:latest"
-export API_BASE_URL="https://router.huggingface.co/v1"
-export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
-export HF_TOKEN="hf_your_token_here"
-export OPENAI_API_KEY="hf_your_token_here"
+export LOCAL_IMAGE_NAME="sql-env:latest"
 python inference.py
 ```
 
 ### Option 3: Development server (no Docker)
 
 ```bash
-git clone https://github.com/Prabhav-020108/SQL-OpenEnv.git
-cd SQL-OpenEnv
 pip install -e sql_env/
 PYTHONPATH=./sql_env uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ---
 
-## 🤖 Running the Baseline Inference Script
+## 🤖 Environment Variables
 
-### Required environment variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `API_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
-| `MODEL_NAME` | Model identifier | `Qwen/Qwen2.5-72B-Instruct` |
-| `HF_TOKEN` | Hugging Face / API key | `hf_...` |
-| `IMAGE_NAME` | Docker image name or Space URL | `sql-env:latest` |
-
-### Linux / Mac
-
-```bash
-export API_BASE_URL="https://router.huggingface.co/v1"
-export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
-export HF_TOKEN="hf_your_token_here"
-export OPENAI_API_KEY="hf_your_token_here"
-export IMAGE_NAME="sql-env:latest"
-python inference.py
-```
-
-### Windows PowerShell
-
-```powershell
-$env:API_BASE_URL = "https://router.huggingface.co/v1"
-$env:MODEL_NAME   = "Qwen/Qwen2.5-72B-Instruct"
-$env:HF_TOKEN     = "hf_your_token_here"
-$env:OPENAI_API_KEY     = "hf_your_token_here"
-$env:IMAGE_NAME   = "sql-env:latest"
-python inference.py
-```
-
-### Expected stdout format
-
-```
-[START] task=<task_name> env=sql_env model=<model_name>
-[STEP] step=<n> action=<sql_trimmed_to_100_chars> reward=<0.00> done=<true|false> error=<msg|null>
-[END] success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
-```
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `API_BASE_URL` | No | `https://router.huggingface.co/v1` | LLM API endpoint |
+| `MODEL_NAME` | No | `Qwen/Qwen2.5-72B-Instruct` | Model identifier |
+| `HF_TOKEN` | **Yes** | — | Hugging Face / API key |
+| `LOCAL_IMAGE_NAME` | **Yes** | — | Docker image name or Space URL |
 
 ---
 
@@ -529,25 +448,25 @@ python inference.py
 
 ```
 SQL-OpenEnv/                         ← repo root
-├── inference.py                     ← Baseline agent script (REQUIRED at root)
-├── README.md                        ← This file (HF Space frontmatter at top)
-├── openenv.yaml                     ← OpenEnv manifest (spec_version, app, port)
-├── pyproject.toml                   ← Root package config for openenv validate
-├── Dockerfile                       ← Container definition for HF Space deployment
-├── validate-submission.sh           ← Hackathon pre-submission validator
+├── inference.py                     ← Baseline agent script
+├── README.md                        ← This file
+├── openenv.yaml                     ← OpenEnv manifest
+├── pyproject.toml                   ← Root package config
+├── Dockerfile                       ← Container definition
+├── validate-submission.sh           ← Submission validator
 ├── LICENSE                          ← MIT License
 └── sql_env/
-    ├── __init__.py                  ← Exports SqlEnv, SqlAction, SqlObservation
-    ├── models.py                    ← Pydantic models: SqlAction, SqlObservation
-    ├── client.py                    ← SqlEnv WebSocket/HTTP client (EnvClient)
-    ├── openenv.yaml                 ← Package-level OpenEnv manifest
-    ├── pyproject.toml               ← Package dependencies
+    ├── __init__.py
+    ├── models.py                    ← SqlAction, SqlObservation
+    ├── client.py                    ← SqlEnv client
+    ├── openenv.yaml
+    ├── pyproject.toml
     └── server/
-        ├── __init__.py              ← Exports SqlEnvironment
-        ├── sql_environment.py       ← Core logic: 4 TASKS, grader, reward function
-        ├── app.py                   ← FastAPI app via create_app()
-        ├── requirements.txt         ← Docker pip dependencies
-        └── Dockerfile               ← Inner Dockerfile (standalone sql_env package)
+        ├── __init__.py
+        ├── sql_environment.py       ← 5 tasks, grader, reward function
+        ├── app.py                   ← FastAPI app
+        ├── requirements.txt
+        └── Dockerfile
 ```
 
 ---
@@ -556,25 +475,17 @@ SQL-OpenEnv/                         ← repo root
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check — returns `{"status": "healthy"}` |
-| `/reset` | POST | Start new episode — pass `{"task": "task_name"}` optionally |
-| `/step` | POST | Execute SQL action — returns observation + reward |
+| `/health` | GET | Health check |
+| `/reset` | POST | Start new episode — pass `{"task": "task_name"}` |
+| `/step` | POST | Execute SQL — pass `{"action": {"sql_query": "..."}}` |
 | `/state` | GET | Get current episode state |
-| `/ws` | WebSocket | Persistent session endpoint (used by Python client) |
+| `/ws` | WebSocket | Persistent session endpoint |
 | `/docs` | GET | Interactive OpenAPI documentation |
-| `/web` | GET | Built-in OpenEnv web UI for manual testing |
+| `/web` | GET | Built-in OpenEnv web UI |
 
 ---
 
 ## ✅ OpenEnv Spec Compliance
-
-```bash
-# Validate locally
-openenv validate --verbose
-
-# Run full submission validator
-bash validate-submission.sh https://Codexzzz-sql-env.hf.space .
-```
 
 - ✅ `openenv.yaml` at root with `spec_version: 1`
 - ✅ Typed Pydantic `Action` and `Observation` models
@@ -583,8 +494,10 @@ bash validate-submission.sh https://Codexzzz-sql-env.hf.space .
 - ✅ Docker containerized — builds and runs cleanly
 - ✅ Deployed on HF Space tagged with `openenv`
 - ✅ Baseline inference script: correct `[START]`/`[STEP]`/`[END]` format
-- ✅ 4 tasks with programmatic F1-based graders
+- ✅ 5 tasks with programmatic F1-based graders
 - ✅ All rewards clamped to `[-0.10, 1.00]` range
+- ✅ Score output strictly in `(0, 1)` — never exactly `0.0` or `1.0`
+- ✅ Float normalization prevents IEEE 754 false mismatches
 
 ---
 
@@ -595,3 +508,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 *Built with [OpenEnv](https://github.com/meta-pytorch/OpenEnv) | Meta × Hugging Face Hackathon 2026*
+*Team: Prabhav Tiwari, Shaurya Khanna, Yashraj Pala (Devsters)*
